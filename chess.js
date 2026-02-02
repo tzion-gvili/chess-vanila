@@ -115,7 +115,9 @@ class ChessGame {
                 
                 // If AI is enabled and it's black's turn, make AI move
                 if (this.aiEnabled && this.currentPlayer === 'black' && !this.gameOver) {
-                    setTimeout(() => this.makeAIMove(), 500);
+                    setTimeout(() => {
+                        this.makeAIMove();
+                    }, 500);
                 }
             } else {
                 // Invalid move, show warning
@@ -458,14 +460,16 @@ class ChessGame {
                 if (piece && piece.color === color) {
                     for (let toRow = 0; toRow < 8; toRow++) {
                         for (let toCol = 0; toCol < 8; toCol++) {
-                            if (this.isValidMove(row, col, toRow, toCol) && 
-                                !this.wouldMovePutKingInCheck(row, col, toRow, toCol)) {
-                                moves.push({
-                                    from: [row, col],
-                                    to: [toRow, toCol],
-                                    piece: piece,
-                                    captured: this.board[toRow][toCol]
-                                });
+                            if (this.isValidMove(row, col, toRow, toCol)) {
+                                // Check if this move would put king in check
+                                if (!this.wouldMovePutKingInCheck(row, col, toRow, toCol)) {
+                                    moves.push({
+                                        from: [row, col],
+                                        to: [toRow, toCol],
+                                        piece: piece,
+                                        captured: this.board[toRow][toCol]
+                                    });
+                                }
                             }
                         }
                     }
@@ -477,7 +481,7 @@ class ChessGame {
     
     evaluateMove(move) {
         let score = 0;
-        const { captured, piece, to } = move;
+        const { captured, piece, to, from } = move;
         
         // Prefer capturing pieces
         if (captured) {
@@ -494,7 +498,7 @@ class ChessGame {
         
         // Prefer moving pieces forward (for pawns)
         if (piece.type === 'pawn' && piece.color === 'black') {
-            score += (to[0] - move.from[0]) * 0.1; // Moving forward is good
+            score += (to[0] - from[0]) * 0.1; // Moving forward is good (down the board)
         }
         
         // Prefer center control
@@ -508,7 +512,9 @@ class ChessGame {
     }
     
     makeAIMove() {
-        if (this.gameOver || this.currentPlayer !== 'black') return;
+        if (this.gameOver || this.currentPlayer !== 'black' || !this.aiEnabled) {
+            return;
+        }
         
         const possibleMoves = this.getAllPossibleMoves('black');
         
@@ -537,6 +543,10 @@ class ChessGame {
         this.currentPlayer = 'white';
         this.updateDisplay();
         this.checkGameStatus();
+        
+        // Clear any selection
+        this.selectedSquare = null;
+        this.clearHighlights();
     }
     
     toggleAI() {
