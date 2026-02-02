@@ -188,6 +188,14 @@ button:active {
     transform: translateY(0);
 }
 
+#ai-toggle {
+    background: #667eea;
+}
+
+#ai-toggle:hover {
+    background: #5568d3;
+}
+
 .move-history {
     background: #f5f5f5;
     border-radius: 10px;

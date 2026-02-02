@@ -6,6 +6,7 @@ class ChessGame {
         this.moveHistory = [];
         this.flipped = false;
         this.gameOver = false;
+        this.aiEnabled = true;
         
         this.createBoard();
         this.updateDisplay();
@@ -111,6 +112,11 @@ class ChessGame {
                 this.currentPlayer = this.currentPlayer === 'white' ? 'black' : 'white';
                 this.updateDisplay();
                 this.checkGameStatus();
+                
+                // If AI is enabled and it's black's turn, make AI move
+                if (this.aiEnabled && this.currentPlayer === 'black' && !this.gameOver) {
+                    setTimeout(() => this.makeAIMove(), 500);
+                }
             } else {
                 // Invalid move, show warning
                 const pieceName = selectedPiece ? selectedPiece.type : 'piece';
@@ -439,11 +445,111 @@ class ChessGame {
         document.getElementById('game-status').textContent = '';
         this.hideWarning();
         this.updateDisplay();
+        
+        // If AI is enabled and it's black's turn after reset, make AI move
+        // (This won't happen on reset, but keeping for consistency)
+    }
+    
+    getAllPossibleMoves(color) {
+        const moves = [];
+        for (let row = 0; row < 8; row++) {
+            for (let col = 0; col < 8; col++) {
+                const piece = this.board[row][col];
+                if (piece && piece.color === color) {
+                    for (let toRow = 0; toRow < 8; toRow++) {
+                        for (let toCol = 0; toCol < 8; toCol++) {
+                            if (this.isValidMove(row, col, toRow, toCol) && 
+                                !this.wouldMovePutKingInCheck(row, col, toRow, toCol)) {
+                                moves.push({
+                                    from: [row, col],
+                                    to: [toRow, toCol],
+                                    piece: piece,
+                                    captured: this.board[toRow][toCol]
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return moves;
+    }
+    
+    evaluateMove(move) {
+        let score = 0;
+        const { captured, piece, to } = move;
+        
+        // Prefer capturing pieces
+        if (captured) {
+            const pieceValues = {
+                pawn: 1,
+                knight: 3,
+                bishop: 3,
+                rook: 5,
+                queen: 9,
+                king: 100
+            };
+            score += pieceValues[captured.type] || 0;
+        }
+        
+        // Prefer moving pieces forward (for pawns)
+        if (piece.type === 'pawn' && piece.color === 'black') {
+            score += (to[0] - move.from[0]) * 0.1; // Moving forward is good
+        }
+        
+        // Prefer center control
+        const centerDistance = Math.abs(to[0] - 3.5) + Math.abs(to[1] - 3.5);
+        score += (4 - centerDistance) * 0.1;
+        
+        // Random factor to make it less predictable
+        score += Math.random() * 0.5;
+        
+        return score;
+    }
+    
+    makeAIMove() {
+        if (this.gameOver || this.currentPlayer !== 'black') return;
+        
+        const possibleMoves = this.getAllPossibleMoves('black');
+        
+        if (possibleMoves.length === 0) {
+            // No moves available - checkmate or stalemate
+            return;
+        }
+        
+        // Evaluate all moves and pick the best one
+        let bestMove = possibleMoves[0];
+        let bestScore = this.evaluateMove(bestMove);
+        
+        for (let move of possibleMoves) {
+            const score = this.evaluateMove(move);
+            if (score > bestScore) {
+                bestScore = score;
+                bestMove = move;
+            }
+        }
+        
+        // Make the move
+        const [fromRow, fromCol] = bestMove.from;
+        const [toRow, toCol] = bestMove.to;
+        
+        this.makeMove(fromRow, fromCol, toRow, toCol);
+        this.currentPlayer = 'white';
+        this.updateDisplay();
+        this.checkGameStatus();
+    }
+    
+    toggleAI() {
+        this.aiEnabled = !this.aiEnabled;
+        const aiButton = document.getElementById('ai-toggle');
+        aiButton.textContent = this.aiEnabled ? 'AI: ON' : 'AI: OFF';
+        aiButton.style.background = this.aiEnabled ? '#667eea' : '#999';
     }
     
     setupEventListeners() {
         document.getElementById('reset-btn').addEventListener('click', () => this.resetGame());
         document.getElementById('flip-board').addEventListener('click', () => this.flipBoard());
+        document.getElementById('ai-toggle').addEventListener('click', () => this.toggleAI());
     }
 }
 
