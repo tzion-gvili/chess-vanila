@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess Game</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>♔ Chess Game ♔</h1>
+            <div class="game-info">
+                <div class="turn-indicator">
+                    <span id="current-turn">White's Turn</span>
+                </div>
+                <div class="status" id="game-status"></div>
+            </div>
+            <div class="warning-message" id="warning-message"></div>
+        </header>
+        
+        <div class="game-board-container">
+            <div id="chessboard"></div>
+        </div>
+        
+        <div class="controls">
+            <button id="reset-btn">New Game</button>
+            <button id="flip-board">Flip Board</button>
+        </div>
+        
+        <div class="move-history">
+            <h3>Move History</h3>
+            <div id="move-list"></div>
+        </div>
+        
+        <footer class="contact-info">
+            <p>TgSofts +9725914007</p>
+        </footer>
+    </div>
+    
+    <script src="chess.js"></script>
+</body>
+</html>
+
