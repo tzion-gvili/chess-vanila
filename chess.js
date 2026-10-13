@@ -1,3 +1,7 @@
+const PIECE_VALUES = { pawn: 1, knight: 3, bishop: 3, rook: 5, queen: 9, king: 0 };
+const FILES = 'abcdefgh';
+const CHEAT_CODE = 'ninja';
+
 class ChessGame {
     constructor() {
         this.board = this.initializeBoard();
@@ -7,6 +11,10 @@ class ChessGame {
         this.flipped = false;
         this.gameOver = false;
         this.aiEnabled = true;
+        this.aiTimer = null;
+        this.warningTimer = null;
+        this.ninjaReady = false;
+        this.cheatBuffer = '';
         
         this.createBoard();
         this.updateDisplay();
@@ -36,8 +44,11 @@ class ChessGame {
         const boardElement = document.getElementById('chessboard');
         boardElement.innerHTML = '';
         
-        for (let row = 0; row < 8; row++) {
-            for (let col = 0; col < 8; col++) {
+        for (let displayRow = 0; displayRow < 8; displayRow++) {
+            for (let displayCol = 0; displayCol < 8; displayCol++) {
+                const row = this.flipped ? 7 - displayRow : displayRow;
+                const col = this.flipped ? 7 - displayCol : displayCol;
+                
                 const square = document.createElement('div');
                 square.className = 'square';
                 square.classList.add((row + col) % 2 === 0 ? 'light' : 'dark');
@@ -80,10 +91,19 @@ class ChessGame {
         return symbols[piece.color][piece.type];
     }
     
+    isAITurn() {
+        return this.aiEnabled && this.currentPlayer === 'black';
+    }
+    
     handleSquareClick(row, col) {
-        if (this.gameOver) return;
+        if (this.gameOver || this.isAITurn()) return;
         
         const piece = this.board[row][col];
+        
+        if (this.ninjaReady) {
+            this.handleNinjaClick(row, col, piece);
+            return;
+        }
         
         // If a square is already selected
         if (this.selectedSquare) {
@@ -106,19 +126,8 @@ class ChessGame {
                 }
                 
                 this.makeMove(selectedRow, selectedCol, row, col);
-                this.selectedSquare = null;
-                this.clearHighlights();
                 this.hideWarning();
-                this.currentPlayer = this.currentPlayer === 'white' ? 'black' : 'white';
-                this.updateDisplay();
-                this.checkGameStatus();
-                
-                // If AI is enabled and it's black's turn, make AI move
-                if (this.aiEnabled && this.currentPlayer === 'black' && !this.gameOver) {
-                    setTimeout(() => {
-                        this.makeAIMove();
-                    }, 500);
-                }
+                this.finishTurn();
             } else {
                 // Invalid move, show warning
                 const pieceName = selectedPiece ? selectedPiece.type : 'piece';
@@ -126,6 +135,7 @@ class ChessGame {
                 this.selectedSquare = null;
                 this.clearHighlights();
                 this.updateDisplay();
+                this.checkGameStatus();
             }
         } else {
             // Select a piece if it belongs to current player
@@ -139,6 +149,21 @@ class ChessGame {
                 // Clicking on empty square without selection
                 this.showWarning("Hey my friend... pay attention to the board! Please select a piece first.");
             }
+        }
+    }
+    
+    finishTurn() {
+        this.selectedSquare = null;
+        this.currentPlayer = this.currentPlayer === 'white' ? 'black' : 'white';
+        this.updateDisplay();
+        this.checkGameStatus();
+        this.scheduleAIMove();
+    }
+    
+    scheduleAIMove() {
+        if (this.isAITurn() && !this.gameOver) {
+            clearTimeout(this.aiTimer);
+            this.aiTimer = setTimeout(() => this.makeAIMove(), 500);
         }
     }
     
@@ -160,7 +185,7 @@ class ChessGame {
         
         for (let r = 0; r < 8; r++) {
             for (let c = 0; c < 8; c++) {
-                if (this.isValidMove(row, col, r, c)) {
+                if (this.isLegalMove(row, col, r, c)) {
                     const square = this.getSquareElement(r, c);
                     if (square) square.classList.add('possible-move');
                 }
@@ -170,7 +195,7 @@ class ChessGame {
     
     clearHighlights() {
         document.querySelectorAll('.square').forEach(square => {
-            square.classList.remove('selected', 'possible-move', 'in-check');
+            square.classList.remove('selected', 'possible-move', 'ninja-target');
         });
     }
     
@@ -203,6 +228,12 @@ class ChessGame {
             default:
                 return false;
         }
+    }
+    
+    // A valid move that also keeps the mover's own king safe.
+    isLegalMove(fromRow, fromCol, toRow, toCol) {
+        return this.isValidMove(fromRow, fromCol, toRow, toCol) &&
+               !this.wouldMovePutKingInCheck(fromRow, fromCol, toRow, toCol);
     }
     
     isValidPawnMove(fromRow, fromCol, toRow, toCol, color) {
@@ -278,25 +309,45 @@ class ChessGame {
         return rowDiff <= 1 && colDiff <= 1 && (rowDiff > 0 || colDiff > 0);
     }
     
+    isPromotion(piece, toRow) {
+        return piece.type === 'pawn' && (toRow === 0 || toRow === 7);
+    }
+    
     makeMove(fromRow, fromCol, toRow, toCol) {
         const piece = this.board[fromRow][fromCol];
         const captured = this.board[toRow][toCol];
+        const promoted = this.isPromotion(piece, toRow);
         
-        this.board[toRow][toCol] = piece;
+        this.board[toRow][toCol] = promoted ? { type: 'queen', color: piece.color } : piece;
         this.board[fromRow][fromCol] = null;
         
         // Record move
-        const moveNotation = this.getMoveNotation(piece, fromRow, fromCol, toRow, toCol, captured);
+        const moveNotation = this.getMoveNotation(piece, fromRow, fromCol, toRow, toCol, captured, promoted);
         this.moveHistory.push(moveNotation);
         this.updateMoveHistory();
     }
     
-    getMoveNotation(piece, fromRow, fromCol, toRow, toCol, captured) {
-        const files = 'abcdefgh';
-        const fromSquare = files[fromCol] + (8 - fromRow);
-        const toSquare = files[toCol] + (8 - toRow);
+    // Plays a move on the board, runs fn, then puts everything back.
+    withMove(fromRow, fromCol, toRow, toCol, fn) {
+        const piece = this.board[fromRow][fromCol];
+        const captured = this.board[toRow][toCol];
+        
+        this.board[toRow][toCol] = this.isPromotion(piece, toRow) ? { type: 'queen', color: piece.color } : piece;
+        this.board[fromRow][fromCol] = null;
+        try {
+            return fn();
+        } finally {
+            this.board[fromRow][fromCol] = piece;
+            this.board[toRow][toCol] = captured;
+        }
+    }
+    
+    getMoveNotation(piece, fromRow, fromCol, toRow, toCol, captured, promoted) {
+        const fromSquare = FILES[fromCol] + (8 - fromRow);
+        const toSquare = FILES[toCol] + (8 - toRow);
         const capture = captured ? 'x' : '';
-        return `${this.moveHistory.length + 1}. ${piece.color === 'white' ? 'White' : 'Black'} ${piece.type} ${fromSquare}${capture}${toSquare}`;
+        const promotion = promoted ? '=Q' : '';
+        return `${this.moveHistory.length + 1}. ${piece.color === 'white' ? 'White' : 'Black'} ${piece.type} ${fromSquare}${capture}${toSquare}${promotion}`;
     }
     
     updateMoveHistory() {
@@ -344,8 +395,25 @@ class ChessGame {
         return false;
     }
     
+    hasAnyLegalMove(color) {
+        for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+                const piece = this.board[r][c];
+                if (!piece || piece.color !== color) continue;
+                for (let tr = 0; tr < 8; tr++) {
+                    for (let tc = 0; tc < 8; tc++) {
+                        if (this.isLegalMove(r, c, tr, tc)) return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+    
     checkGameStatus() {
+        const status = document.getElementById('game-status');
         const inCheck = this.isInCheck(this.currentPlayer);
+        
         if (inCheck) {
             const kingPos = this.findKing(this.currentPlayer);
             if (kingPos) {
@@ -353,52 +421,24 @@ class ChessGame {
                 const square = this.getSquareElement(row, col);
                 if (square) square.classList.add('in-check');
             }
-            
-            // Check for checkmate (simplified - just check if any move is possible)
-            let hasValidMove = false;
-            for (let r = 0; r < 8 && !hasValidMove; r++) {
-                for (let c = 0; c < 8 && !hasValidMove; c++) {
-                    const piece = this.board[r][c];
-                    if (piece && piece.color === this.currentPlayer) {
-                        for (let tr = 0; tr < 8 && !hasValidMove; tr++) {
-                            for (let tc = 0; tc < 8 && !hasValidMove; tc++) {
-                                if (this.isValidMove(r, c, tr, tc)) {
-                                    hasValidMove = true;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            
-            if (!hasValidMove) {
-                this.gameOver = true;
+        }
+        
+        if (!this.hasAnyLegalMove(this.currentPlayer)) {
+            this.gameOver = true;
+            if (inCheck) {
                 const winner = this.currentPlayer === 'white' ? 'Black' : 'White';
-                document.getElementById('game-status').textContent = `Checkmate! ${winner} wins!`;
+                status.textContent = `Checkmate! ${winner} wins!`;
             } else {
-                document.getElementById('game-status').textContent = 'Check!';
+                status.textContent = "Stalemate! It's a draw.";
             }
         } else {
-            document.getElementById('game-status').textContent = '';
+            status.textContent = inCheck ? 'Check!' : '';
         }
     }
     
     wouldMovePutKingInCheck(fromRow, fromCol, toRow, toCol) {
-        // Make a temporary move
-        const piece = this.board[fromRow][fromCol];
-        const captured = this.board[toRow][toCol];
-        
-        this.board[toRow][toCol] = piece;
-        this.board[fromRow][fromCol] = null;
-        
-        // Check if king is in check
-        const inCheck = this.isInCheck(this.currentPlayer);
-        
-        // Undo the move
-        this.board[fromRow][fromCol] = piece;
-        this.board[toRow][toCol] = captured;
-        
-        return inCheck;
+        const color = this.board[fromRow][fromCol].color;
+        return this.withMove(fromRow, fromCol, toRow, toCol, () => this.isInCheck(color));
     }
     
     getGreeting() {
@@ -415,7 +455,8 @@ class ChessGame {
         warningElement.classList.add('show');
         
         // Auto-hide after 4 seconds
-        setTimeout(() => {
+        clearTimeout(this.warningTimer);
+        this.warningTimer = setTimeout(() => {
             this.hideWarning();
         }, 4000);
     }
@@ -434,22 +475,24 @@ class ChessGame {
     
     flipBoard() {
         this.flipped = !this.flipped;
-        // This is a simplified flip - in a full implementation, you'd rotate the board
         this.updateDisplay();
+        if (this.selectedSquare) this.selectSquare(...this.selectedSquare);
+        if (this.ninjaReady) this.highlightNinjaTargets();
+        if (this.isInCheck(this.currentPlayer)) this.checkGameStatus();
     }
     
     resetGame() {
+        clearTimeout(this.aiTimer);
         this.board = this.initializeBoard();
         this.currentPlayer = 'white';
         this.selectedSquare = null;
         this.moveHistory = [];
         this.gameOver = false;
+        this.cancelNinja();
         document.getElementById('game-status').textContent = '';
         this.hideWarning();
         this.updateDisplay();
-        
-        // If AI is enabled and it's black's turn after reset, make AI move
-        // (This won't happen on reset, but keeping for consistency)
+        this.updateMoveHistory();
     }
     
     getAllPossibleMoves(color) {
@@ -460,16 +503,13 @@ class ChessGame {
                 if (piece && piece.color === color) {
                     for (let toRow = 0; toRow < 8; toRow++) {
                         for (let toCol = 0; toCol < 8; toCol++) {
-                            if (this.isValidMove(row, col, toRow, toCol)) {
-                                // Check if this move would put king in check
-                                if (!this.wouldMovePutKingInCheck(row, col, toRow, toCol)) {
-                                    moves.push({
-                                        from: [row, col],
-                                        to: [toRow, toCol],
-                                        piece: piece,
-                                        captured: this.board[toRow][toCol]
-                                    });
-                                }
+                            if (this.isLegalMove(row, col, toRow, toCol)) {
+                                moves.push({
+                                    from: [row, col],
+                                    to: [toRow, toCol],
+                                    piece: piece,
+                                    captured: this.board[toRow][toCol]
+                                });
                             }
                         }
                     }
@@ -479,22 +519,41 @@ class ChessGame {
         return moves;
     }
     
-    evaluateMove(move) {
-        let score = 0;
-        const { captured, piece, to, from } = move;
-        
-        // Prefer capturing pieces
-        if (captured) {
-            const pieceValues = {
-                pawn: 1,
-                knight: 3,
-                bishop: 3,
-                rook: 5,
-                queen: 9,
-                king: 100
-            };
-            score += pieceValues[captured.type] || 0;
+    // Value of the best piece `color` could capture right now.
+    bestCaptureValue(color) {
+        let best = 0;
+        for (let row = 0; row < 8; row++) {
+            for (let col = 0; col < 8; col++) {
+                const piece = this.board[row][col];
+                if (!piece || piece.color !== color) continue;
+                for (let toRow = 0; toRow < 8; toRow++) {
+                    for (let toCol = 0; toCol < 8; toCol++) {
+                        const target = this.board[toRow][toCol];
+                        if (target && target.color !== color && PIECE_VALUES[target.type] > best &&
+                            this.isValidMove(row, col, toRow, toCol)) {
+                            best = PIECE_VALUES[target.type];
+                        }
+                    }
+                }
+            }
         }
+        return best;
+    }
+    
+    evaluateMove(move) {
+        const { captured, piece, to, from } = move;
+        const opponent = piece.color === 'white' ? 'black' : 'white';
+        let score = captured ? PIECE_VALUES[captured.type] : 0;
+        
+        if (this.isPromotion(piece, to[0])) score += 8;
+        
+        // Look one reply ahead, so the AI does not leave pieces hanging.
+        this.withMove(from[0], from[1], to[0], to[1], () => {
+            if (!this.hasAnyLegalMove(opponent)) {
+                score += this.isInCheck(opponent) ? 1000 : -50;
+            }
+            score -= this.bestCaptureValue(opponent);
+        });
         
         // Prefer moving pieces forward (for pawns)
         if (piece.type === 'pawn' && piece.color === 'black') {
@@ -512,7 +571,7 @@ class ChessGame {
     }
     
     makeAIMove() {
-        if (this.gameOver || this.currentPlayer !== 'black' || !this.aiEnabled) {
+        if (this.gameOver || !this.isAITurn()) {
             return;
         }
         
@@ -525,7 +584,7 @@ class ChessGame {
         
         // Evaluate all moves and pick the best one
         let bestMove = possibleMoves[0];
-        let bestScore = this.evaluateMove(bestMove);
+        let bestScore = -Infinity;
         
         for (let move of possibleMoves) {
             const score = this.evaluateMove(move);
@@ -540,13 +599,7 @@ class ChessGame {
         const [toRow, toCol] = bestMove.to;
         
         this.makeMove(fromRow, fromCol, toRow, toCol);
-        this.currentPlayer = 'white';
-        this.updateDisplay();
-        this.checkGameStatus();
-        
-        // Clear any selection
-        this.selectedSquare = null;
-        this.clearHighlights();
+        this.finishTurn();
     }
     
     toggleAI() {
@@ -554,12 +607,101 @@ class ChessGame {
         const aiButton = document.getElementById('ai-toggle');
         aiButton.textContent = this.aiEnabled ? 'AI: ON' : 'AI: OFF';
         aiButton.style.background = this.aiEnabled ? '#667eea' : '#999';
+        
+        if (this.aiEnabled) {
+            this.selectedSquare = null;
+            this.cancelNinja();
+            this.clearHighlights();
+            this.scheduleAIMove();
+        } else {
+            clearTimeout(this.aiTimer);
+        }
+    }
+    
+    // ---------- ninja cheat: type "ninja", then click any enemy piece ----------
+    
+    handleKey(e) {
+        if (e.key === 'Escape' && this.ninjaReady) {
+            this.cancelNinja();
+            return;
+        }
+        if (e.key.length !== 1) return;
+        
+        this.cheatBuffer = (this.cheatBuffer + e.key.toLowerCase()).slice(-CHEAT_CODE.length);
+        if (this.cheatBuffer === CHEAT_CODE) {
+            this.cheatBuffer = '';
+            this.activateNinja();
+        }
+    }
+    
+    activateNinja() {
+        if (this.gameOver || this.isAITurn()) return;
+        
+        this.ninjaReady = true;
+        this.selectedSquare = null;
+        this.clearHighlights();
+        this.hideWarning();
+        this.highlightNinjaTargets();
+        
+        const ninjaMessage = document.getElementById('ninja-message');
+        ninjaMessage.textContent = '🥷 Ninja is here! Click any enemy piece and he eats it. (Esc to cancel)';
+        ninjaMessage.classList.add('show');
+    }
+    
+    cancelNinja() {
+        this.ninjaReady = false;
+        document.getElementById('ninja-message').classList.remove('show');
+        document.querySelectorAll('.ninja-target').forEach(square => square.classList.remove('ninja-target'));
+    }
+    
+    highlightNinjaTargets() {
+        for (let row = 0; row < 8; row++) {
+            for (let col = 0; col < 8; col++) {
+                const piece = this.board[row][col];
+                if (piece && piece.color !== this.currentPlayer && piece.type !== 'king') {
+                    const square = this.getSquareElement(row, col);
+                    if (square) square.classList.add('ninja-target');
+                }
+            }
+        }
+    }
+    
+    handleNinjaClick(row, col, piece) {
+        if (!piece || piece.color === this.currentPlayer) {
+            this.showWarning("Hey my friend... the ninja only eats enemy pieces!");
+            return;
+        }
+        if (piece.type === 'king') {
+            this.showWarning("Hey my friend... even a ninja can't eat the king!");
+            return;
+        }
+        
+        this.board[row][col] = null;
+        const player = this.currentPlayer === 'white' ? 'White' : 'Black';
+        this.moveHistory.push(`${this.moveHistory.length + 1}. ${player} 🥷 ninja ate ${piece.color} ${piece.type} on ${FILES[col]}${8 - row}`);
+        this.updateMoveHistory();
+        
+        this.cancelNinja();
+        this.finishTurn();
+        this.showNinjaStrike(row, col);
+    }
+    
+    showNinjaStrike(row, col) {
+        const square = this.getSquareElement(row, col);
+        if (!square) return;
+        
+        const ninja = document.createElement('div');
+        ninja.className = 'piece ninja-strike';
+        ninja.textContent = '🥷';
+        square.appendChild(ninja);
+        setTimeout(() => ninja.remove(), 900);
     }
     
     setupEventListeners() {
         document.getElementById('reset-btn').addEventListener('click', () => this.resetGame());
         document.getElementById('flip-board').addEventListener('click', () => this.flipBoard());
         document.getElementById('ai-toggle').addEventListener('click', () => this.toggleAI());
+        document.addEventListener('keydown', (e) => this.handleKey(e));
     }
 }
 
@@ -567,4 +709,3 @@ class ChessGame {
 document.addEventListener('DOMContentLoaded', () => {
     new ChessGame();
 });
-
