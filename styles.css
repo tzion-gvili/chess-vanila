@@ -228,6 +228,15 @@ button:active {
     background: #5568d3;
 }
 
+#ninja-btn {
+    background: #222;
+}
+
+#ninja-btn:hover,
+#ninja-btn.armed {
+    background: #d32f2f;
+}
+
 .move-history {
     background: #f5f5f5;
     border-radius: 10px;

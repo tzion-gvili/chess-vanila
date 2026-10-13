@@ -1,6 +1,5 @@
 const PIECE_VALUES = { pawn: 1, knight: 3, bishop: 3, rook: 5, queen: 9, king: 0 };
 const FILES = 'abcdefgh';
-const CHEAT_CODE = 'ninja';
 
 class ChessGame {
     constructor() {
@@ -14,7 +13,6 @@ class ChessGame {
         this.aiTimer = null;
         this.warningTimer = null;
         this.ninjaReady = false;
-        this.cheatBuffer = '';
         
         this.createBoard();
         this.updateDisplay();
@@ -618,18 +616,12 @@ class ChessGame {
         }
     }
     
-    // ---------- ninja cheat: type "ninja", then click any enemy piece ----------
+    // ---------- ninja: press the Ninja button, then click any enemy piece ----------
     
-    handleKey(e) {
-        if (e.key === 'Escape' && this.ninjaReady) {
+    toggleNinja() {
+        if (this.ninjaReady) {
             this.cancelNinja();
-            return;
-        }
-        if (e.key.length !== 1) return;
-        
-        this.cheatBuffer = (this.cheatBuffer + e.key.toLowerCase()).slice(-CHEAT_CODE.length);
-        if (this.cheatBuffer === CHEAT_CODE) {
-            this.cheatBuffer = '';
+        } else {
             this.activateNinja();
         }
     }
@@ -644,13 +636,15 @@ class ChessGame {
         this.highlightNinjaTargets();
         
         const ninjaMessage = document.getElementById('ninja-message');
-        ninjaMessage.textContent = '🥷 Ninja is here! Click any enemy piece and he eats it. (Esc to cancel)';
+        ninjaMessage.textContent = '🥷 Ninja is here! Click any enemy piece and he eats it. (Click Ninja again or Esc to cancel)';
         ninjaMessage.classList.add('show');
+        document.getElementById('ninja-btn').classList.add('armed');
     }
     
     cancelNinja() {
         this.ninjaReady = false;
         document.getElementById('ninja-message').classList.remove('show');
+        document.getElementById('ninja-btn').classList.remove('armed');
         document.querySelectorAll('.ninja-target').forEach(square => square.classList.remove('ninja-target'));
     }
     
@@ -701,7 +695,10 @@ class ChessGame {
         document.getElementById('reset-btn').addEventListener('click', () => this.resetGame());
         document.getElementById('flip-board').addEventListener('click', () => this.flipBoard());
         document.getElementById('ai-toggle').addEventListener('click', () => this.toggleAI());
-        document.addEventListener('keydown', (e) => this.handleKey(e));
+        document.getElementById('ninja-btn').addEventListener('click', () => this.toggleNinja());
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this.ninjaReady) this.cancelNinja();
+        });
     }
 }
 
