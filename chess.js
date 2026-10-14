@@ -83,6 +83,9 @@ const KING_STEPS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0]
 const ROOK_DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 const BISHOP_DIRS = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
 
+const PROMOTION_PIECES = ['queen', 'rook', 'bishop', 'knight'];
+const PROMOTION_LETTERS = { queen: 'Q', rook: 'R', bishop: 'B', knight: 'N' };
+
 const MATE_SCORE = 100000;
 const AI_THINK_MS = 1500;
 const AI_MAX_DEPTH = 6;
@@ -102,6 +105,7 @@ class ChessGame {
         this.aiTimer = null;
         this.warningTimer = null;
         this.ninjaReady = false;
+        this.pendingPromotion = null;
         
         this.createBoard();
         this.updateDisplay();
@@ -161,6 +165,19 @@ class ChessGame {
                 boardElement.appendChild(square);
             }
         }
+        this.renderCoordinates();
+    }
+    
+    renderCoordinates() {
+        const files = [];
+        const ranks = [];
+        for (let i = 0; i < 8; i++) {
+            const index = this.flipped ? 7 - i : i;
+            files.push(`<span>${FILES[index].toUpperCase()}</span>`);
+            ranks.push(`<span>${8 - index}</span>`);
+        }
+        for (const id of ['files-top', 'files-bottom']) document.getElementById(id).innerHTML = files.join('');
+        for (const id of ['ranks-left', 'ranks-right']) document.getElementById(id).innerHTML = ranks.join('');
     }
     
     getPieceSymbol(piece) {
@@ -194,7 +211,7 @@ class ChessGame {
     }
     
     handleSquareClick(row, col) {
-        if (this.gameOver || this.isAITurn()) return;
+        if (this.gameOver || this.isAITurn() || this.pendingPromotion) return;
         
         const piece = this.board[row][col];
         
@@ -215,8 +232,14 @@ class ChessGame {
                 return;
             }
             
-            const move = this.getLegalMovesFrom(selectedRow, selectedCol)
-                .find(m => m.to[0] === row && m.to[1] === col);
+            const moves = this.getLegalMovesFrom(selectedRow, selectedCol)
+                .filter(m => m.to[0] === row && m.to[1] === col);
+            const move = moves[0];
+            
+            if (move && move.promotion) {
+                this.showPromotionPicker(moves);
+                return;
+            }
             
             if (move) {
                 this.makeMove(move);
@@ -416,14 +439,15 @@ class ChessGame {
         return row >= 0 && row < 8 && col >= 0 && col < 8;
     }
     
-    createMove(fromRow, fromCol, toRow, toCol, castle = null) {
+    // `promotion` is the piece type a pawn becomes on the last row (defaults to queen).
+    createMove(fromRow, fromCol, toRow, toCol, castle = null, promotion = 'queen') {
         const piece = this.board[fromRow][fromCol];
         return {
             from: [fromRow, fromCol],
             to: [toRow, toCol],
             piece,
             captured: this.board[toRow][toCol],
-            promotion: this.isPromotion(piece, toRow),
+            promotion: this.isPromotion(piece, toRow) ? promotion : null,
             castle
         };
     }
@@ -446,8 +470,15 @@ class ChessGame {
                 const dir = color === 'white' ? -1 : 1;
                 const startRow = color === 'white' ? 6 : 1;
                 const one = row + dir;
+                const pushPawn = (r, c) => {
+                    if (!this.isPromotion(piece, r)) {
+                        moves.push(this.createMove(row, col, r, c));
+                        return;
+                    }
+                    for (const type of PROMOTION_PIECES) moves.push(this.createMove(row, col, r, c, null, type));
+                };
                 if (this.onBoard(one, col) && !this.board[one][col]) {
-                    if (!capturesOnly || this.isPromotion(piece, one)) moves.push(this.createMove(row, col, one, col));
+                    if (!capturesOnly || this.isPromotion(piece, one)) pushPawn(one, col);
                     const two = row + 2 * dir;
                     if (!capturesOnly && row === startRow && !this.board[two][col]) {
                         moves.push(this.createMove(row, col, two, col));
@@ -457,7 +488,7 @@ class ChessGame {
                     const c = col + dc;
                     if (!this.onBoard(one, c)) continue;
                     const target = this.board[one][c];
-                    if (target && target.color !== color) moves.push(this.createMove(row, col, one, c));
+                    if (target && target.color !== color) pushPawn(one, c);
                 }
                 break;
             }
@@ -569,6 +600,7 @@ class ChessGame {
             return;
         }
         if (this.ninjaReady) this.cancelNinja();
+        this.cancelPromotion();
         
         const side = this.castleSideFor(screenSide);
         const reason = this.castleBlockReason(this.currentPlayer, side);
@@ -621,7 +653,7 @@ class ChessGame {
             }
         };
         
-        this.board[to[0]][to[1]] = move.promotion ? { type: 'queen', color: piece.color } : piece;
+        this.board[to[0]][to[1]] = move.promotion ? { type: move.promotion, color: piece.color } : piece;
         this.board[from[0]][from[1]] = null;
         
         if (move.castle) {
@@ -680,7 +712,7 @@ class ChessGame {
         const fromSquare = FILES[from[1]] + (8 - from[0]);
         const toSquare = FILES[to[1]] + (8 - to[0]);
         const capture = captured ? 'x' : '';
-        const promo = promotion ? '=Q' : '';
+        const promo = promotion ? `=${PROMOTION_LETTERS[promotion]}` : '';
         return `${number}. ${player} ${piece.type} ${fromSquare}${capture}${toSquare}${promo}`;
     }
     
@@ -836,6 +868,7 @@ class ChessGame {
         this.moveHistory = [];
         this.gameOver = false;
         this.cancelNinja();
+        this.cancelPromotion();
         document.getElementById('game-status').textContent = '';
         this.hideWarning();
         this.updateDisplay();
@@ -871,7 +904,7 @@ class ChessGame {
     
     orderMoves(moves) {
         const rank = m => (m.captured ? 10 * VALUES[m.captured.type] - VALUES[m.piece.type] + 10000 : 0) +
-                          (m.promotion ? 8000 : 0) +
+                          (m.promotion ? 8000 + VALUES[m.promotion] : 0) +
                           (m.castle ? 50 : 0);
         return moves.sort((a, b) => rank(b) - rank(a));
     }
@@ -1002,6 +1035,7 @@ class ChessGame {
         if (this.aiEnabled) {
             this.selectedSquare = null;
             this.cancelNinja();
+            this.cancelPromotion();
             this.clearHighlights();
             this.scheduleAIMove();
         } else {
@@ -1023,6 +1057,7 @@ class ChessGame {
     
     activateNinja() {
         if (this.gameOver || this.isAITurn()) return;
+        this.cancelPromotion();
         
         this.ninjaReady = true;
         this.selectedSquare = null;
@@ -1094,9 +1129,48 @@ class ChessGame {
         document.getElementById('ninja-btn').addEventListener('click', () => this.toggleNinja());
         document.getElementById('castle-left').addEventListener('click', () => this.castle('left'));
         document.getElementById('castle-right').addEventListener('click', () => this.castle('right'));
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && this.ninjaReady) this.cancelNinja();
+        document.getElementById('promotion-overlay').addEventListener('click', (e) => {
+            if (e.target.id === 'promotion-overlay') this.cancelPromotion();
         });
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            if (this.pendingPromotion) this.cancelPromotion();
+            else if (this.ninjaReady) this.cancelNinja();
+        });
+    }
+    
+    // ---------- promotion: the pawn reached the last row, the player picks his new piece ----------
+    
+    showPromotionPicker(moves) {
+        this.pendingPromotion = moves;
+        const color = moves[0].piece.color;
+        const choices = document.getElementById('promotion-choices');
+        choices.innerHTML = '';
+        
+        for (const type of PROMOTION_PIECES) {
+            const button = document.createElement('button');
+            button.className = 'promotion-choice';
+            button.title = type.charAt(0).toUpperCase() + type.slice(1);
+            button.innerHTML = `<span class="promotion-symbol">${this.getPieceSymbol({ type, color })}</span><span>${button.title}</span>`;
+            button.addEventListener('click', () => this.choosePromotion(type));
+            choices.appendChild(button);
+        }
+        document.getElementById('promotion-overlay').classList.add('show');
+    }
+    
+    choosePromotion(type) {
+        const move = this.pendingPromotion && this.pendingPromotion.find(m => m.promotion === type);
+        this.cancelPromotion();
+        if (!move) return;
+        
+        this.makeMove(move);
+        this.hideWarning();
+        this.finishTurn();
+    }
+    
+    cancelPromotion() {
+        this.pendingPromotion = null;
+        document.getElementById('promotion-overlay').classList.remove('show');
     }
 }
 

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chess Game</title>
-    <link rel="stylesheet" href="styles.css?v=3">
+    <link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
     <div class="container">
@@ -20,7 +20,13 @@
         </header>
         
         <div class="game-board-container">
-            <div id="chessboard"></div>
+            <div class="board-frame">
+                <div class="coords files files-top" id="files-top"></div>
+                <div class="coords ranks ranks-left" id="ranks-left"></div>
+                <div id="chessboard"></div>
+                <div class="coords ranks ranks-right" id="ranks-right"></div>
+                <div class="coords files files-bottom" id="files-bottom"></div>
+            </div>
         </div>
         
         <div class="controls">
@@ -35,6 +41,14 @@
         </div>
         <div class="ninja-message" id="ninja-message"></div>
         
+        <div class="promotion-overlay" id="promotion-overlay">
+            <div class="promotion-dialog">
+                <h3>🎉 Your pawn made it! What should he become?</h3>
+                <div class="promotion-choices" id="promotion-choices"></div>
+                <p class="promotion-hint">Click outside or press Esc to cancel</p>
+            </div>
+        </div>
+        
         <div class="move-history">
             <h3>Move History</h3>
             <div id="move-list"></div>
@@ -45,7 +59,7 @@
         </footer>
     </div>
     
-    <script src="chess.js?v=3"></script>
+    <script src="chess.js?v=5"></script>
 </body>
 </html>
 
