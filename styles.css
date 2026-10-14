@@ -194,8 +194,13 @@ header h1 {
 .controls {
     display: flex;
     justify-content: center;
+    flex-wrap: wrap;
     gap: 15px;
     margin-bottom: 30px;
+}
+
+.castle-controls {
+    margin-top: -15px;
 }
 
 button {
@@ -235,6 +240,22 @@ button:active {
 #ninja-btn:hover,
 #ninja-btn.armed {
     background: #d32f2f;
+}
+
+.castle-btn {
+    background: #2e7d32;
+}
+
+.castle-btn:hover {
+    background: #1b5e20;
+}
+
+.castle-btn.unavailable {
+    background: #bbb;
+}
+
+.castle-btn.unavailable:hover {
+    background: #a5a5a5;
 }
 
 .move-history {
