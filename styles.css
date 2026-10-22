@@ -467,19 +467,21 @@ button:active {
         margin-bottom: 10px;
     }
 
-    /* Board is as wide as the screen, but never so tall that the buttons drop below it */
     .board-frame {
-        width: min(100%, calc(100vh - 170px));
-        width: min(100%, calc(100svh - 170px));
-        min-width: 280px;
+        width: 100%;
         max-width: none;
         grid-template-columns: 14px 1fr 14px;
         grid-template-rows: 14px auto 14px;
         font-size: 0.8em;
     }
 
+    /* Full width, and taller than wide to fill the free height (100vw - 48px = board width;
+       270px = header, labels, buttons and footer). Never shorter than square, never over 1.4x. */
     #chessboard {
         max-width: none;
+        aspect-ratio: auto;
+        height: clamp(calc(100vw - 48px), calc(100vh - 270px), calc((100vw - 48px) * 1.4));
+        height: clamp(calc(100vw - 48px), calc(100svh - 270px), calc((100vw - 48px) * 1.4));
         border-width: 2px;
         container-type: inline-size;
     }
