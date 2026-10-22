@@ -91,7 +91,7 @@ const AI_THINK_MS = 1500;
 const AI_MAX_DEPTH = 6;
 const QUIESCENCE_DEPTH = 6;
 const SEARCH_TIMEOUT = 'search-timeout';
-// A White move that loses this much more than White's best move gets a friendly warning.
+// A player move that loses this much more than the player's best move gets a friendly warning.
 const BLUNDER_MARGIN = 250;
 const BLUNDER_CHECK_MS = 300;
 const BLUNDER_MESSAGE = "Ilay, pay attention, this isn't the smartest move :) Tap again to play it anyway.";
@@ -211,8 +211,17 @@ class ChessGame {
         return color === 'white' ? 'black' : 'white';
     }
     
+    // The player sits at the bottom of the board; the AI plays the other color.
+    humanColor() {
+        return this.flipped ? 'black' : 'white';
+    }
+    
+    aiColor() {
+        return this.opponentOf(this.humanColor());
+    }
+    
     isAITurn() {
-        return this.aiEnabled && this.currentPlayer === 'black';
+        return this.aiEnabled && this.currentPlayer === this.aiColor();
     }
     
     handleSquareClick(row, col) {
@@ -248,7 +257,7 @@ class ChessGame {
             
             if (move) {
                 const key = this.moveKey(move);
-                if (move.piece.color === 'white' && this.blunderWarned !== key && this.isBlunder(move)) {
+                if (move.piece.color === this.humanColor() && this.blunderWarned !== key && this.isBlunder(move)) {
                     this.blunderWarned = key;
                     this.showWarning(BLUNDER_MESSAGE);
                     return;
@@ -863,12 +872,22 @@ class ChessGame {
         this.updateCastleButtons();
     }
     
+    // With the AI on, flipping also swaps sides: the player takes the bottom color.
     flipBoard() {
         this.flipped = !this.flipped;
+        if (this.aiEnabled) {
+            clearTimeout(this.aiTimer);
+            this.selectedSquare = null;
+            this.blunderWarned = null;
+            this.cancelNinja();
+            this.cancelPromotion();
+            this.hideWarning();
+        }
         this.updateDisplay();
         if (this.selectedSquare) this.selectSquare(...this.selectedSquare);
         if (this.ninjaReady) this.highlightNinjaTargets();
         if (this.isInCheck(this.currentPlayer)) this.checkGameStatus();
+        this.scheduleAIMove();
     }
     
     resetGame() {
@@ -886,6 +905,7 @@ class ChessGame {
         this.hideWarning();
         this.updateDisplay();
         this.updateMoveHistory();
+        this.scheduleAIMove();
     }
     
     // ---------- AI: alpha-beta search with iterative deepening ----------
@@ -1027,29 +1047,31 @@ class ChessGame {
         return best;
     }
     
-    // ---------- blunder tip: warn White once, a second tap on the same move plays it ----------
+    // ---------- blunder tip: warn the player once, a second tap on the same move plays it ----------
     
     moveKey(move) {
         return `${move.from.join(',')}-${move.to.join(',')}`;
     }
     
-    // White's score after Black's best answer that only uses captures.
+    // The mover's score after the opponent's best answer that only uses captures.
     scoreAfterCaptures(move) {
+        const opponent = this.opponentOf(move.piece.color);
         const undo = this.applyMove(move);
         try {
-            return -this.quiesce(-Infinity, Infinity, 'black', QUIESCENCE_DEPTH);
+            return -this.quiesce(-Infinity, Infinity, opponent, QUIESCENCE_DEPTH);
         } finally {
             this.undoMove(undo);
         }
     }
     
     allowsMateInOne(move) {
+        const color = move.piece.color;
         const undo = this.applyMove(move);
         try {
-            return this.getAllPossibleMoves('black').some(reply => {
+            return this.getAllPossibleMoves(this.opponentOf(color)).some(reply => {
                 const replyUndo = this.applyMove(reply);
                 try {
-                    return this.isInCheck('white') && !this.hasAnyLegalMove('white');
+                    return this.isInCheck(color) && !this.hasAnyLegalMove(color);
                 } finally {
                     this.undoMove(replyUndo);
                 }
@@ -1064,7 +1086,7 @@ class ChessGame {
         this.searchNodes = 0;
         this.searchDeadline = Date.now() + BLUNDER_CHECK_MS;
         try {
-            const others = this.getAllPossibleMoves('white');
+            const others = this.getAllPossibleMoves(move.piece.color);
             if (this.allowsMateInOne(move)) return others.some(m => !this.allowsMateInOne(m));
             const played = this.scoreAfterCaptures(move);
             return others.some(m => this.scoreAfterCaptures(m) - played >= BLUNDER_MARGIN);
@@ -1079,7 +1101,7 @@ class ChessGame {
             return;
         }
         
-        const bestMove = this.findBestMove('black');
+        const bestMove = this.findBestMove(this.aiColor());
         if (!bestMove) return;
         
         this.makeMove(bestMove);
