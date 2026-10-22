@@ -91,6 +91,10 @@ const AI_THINK_MS = 1500;
 const AI_MAX_DEPTH = 6;
 const QUIESCENCE_DEPTH = 6;
 const SEARCH_TIMEOUT = 'search-timeout';
+// A White move that loses this much more than White's best move gets a friendly warning.
+const BLUNDER_MARGIN = 250;
+const BLUNDER_CHECK_MS = 300;
+const BLUNDER_MESSAGE = "Ilay, pay attention, this isn't the smartest move :) Tap again to play it anyway.";
 
 class ChessGame {
     constructor() {
@@ -106,6 +110,7 @@ class ChessGame {
         this.warningTimer = null;
         this.ninjaReady = false;
         this.pendingPromotion = null;
+        this.blunderWarned = null;
         
         this.createBoard();
         this.updateDisplay();
@@ -242,6 +247,13 @@ class ChessGame {
             }
             
             if (move) {
+                const key = this.moveKey(move);
+                if (move.piece.color === 'white' && this.blunderWarned !== key && this.isBlunder(move)) {
+                    this.blunderWarned = key;
+                    this.showWarning(BLUNDER_MESSAGE);
+                    return;
+                }
+                this.blunderWarned = null;
                 this.makeMove(move);
                 this.hideWarning();
                 this.finishTurn();
@@ -867,6 +879,7 @@ class ChessGame {
         this.selectedSquare = null;
         this.moveHistory = [];
         this.gameOver = false;
+        this.blunderWarned = null;
         this.cancelNinja();
         this.cancelPromotion();
         document.getElementById('game-status').textContent = '';
@@ -1012,6 +1025,53 @@ class ChessGame {
             }
         }
         return best;
+    }
+    
+    // ---------- blunder tip: warn White once, a second tap on the same move plays it ----------
+    
+    moveKey(move) {
+        return `${move.from.join(',')}-${move.to.join(',')}`;
+    }
+    
+    // White's score after Black's best answer that only uses captures.
+    scoreAfterCaptures(move) {
+        const undo = this.applyMove(move);
+        try {
+            return -this.quiesce(-Infinity, Infinity, 'black', QUIESCENCE_DEPTH);
+        } finally {
+            this.undoMove(undo);
+        }
+    }
+    
+    allowsMateInOne(move) {
+        const undo = this.applyMove(move);
+        try {
+            return this.getAllPossibleMoves('black').some(reply => {
+                const replyUndo = this.applyMove(reply);
+                try {
+                    return this.isInCheck('white') && !this.hasAnyLegalMove('white');
+                } finally {
+                    this.undoMove(replyUndo);
+                }
+            });
+        } finally {
+            this.undoMove(undo);
+        }
+    }
+    
+    // Bad only if another move is clearly better, so a lost position doesn't warn on every move.
+    isBlunder(move) {
+        this.searchNodes = 0;
+        this.searchDeadline = Date.now() + BLUNDER_CHECK_MS;
+        try {
+            const others = this.getAllPossibleMoves('white');
+            if (this.allowsMateInOne(move)) return others.some(m => !this.allowsMateInOne(m));
+            const played = this.scoreAfterCaptures(move);
+            return others.some(m => this.scoreAfterCaptures(m) - played >= BLUNDER_MARGIN);
+        } catch (e) {
+            if (e !== SEARCH_TIMEOUT) throw e;
+            return false;
+        }
     }
     
     makeAIMove() {

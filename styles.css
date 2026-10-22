@@ -355,6 +355,7 @@ button:active {
 }
 
 .move-history {
+    display: none;
     background: #f5f5f5;
     border-radius: 10px;
     padding: 20px;
@@ -422,13 +423,13 @@ button:active {
 /* Phone held upright: board, turn info and buttons fit on one screen */
 @media (max-width: 600px) {
     body {
-        padding: 6px;
+        padding: 4px;
         align-items: flex-start;
         overflow-x: hidden;
     }
 
     .container {
-        padding: 10px;
+        padding: 6px;
         border-radius: 12px;
     }
 
@@ -468,12 +469,12 @@ button:active {
 
     /* Board is as wide as the screen, but never so tall that the buttons drop below it */
     .board-frame {
-        width: min(100%, calc(100vh - 250px));
-        width: min(100%, calc(100svh - 250px));
-        min-width: 240px;
+        width: min(100%, calc(100vh - 170px));
+        width: min(100%, calc(100svh - 170px));
+        min-width: 280px;
         max-width: none;
-        grid-template-columns: 18px 1fr 18px;
-        grid-template-rows: 18px auto 18px;
+        grid-template-columns: 14px 1fr 14px;
+        grid-template-rows: 14px auto 14px;
         font-size: 0.8em;
     }
 
