@@ -419,3 +419,133 @@ button:active {
     }
 }
 
+/* Phone held upright: board, turn info and buttons fit on one screen */
+@media (max-width: 600px) {
+    body {
+        padding: 6px;
+        align-items: flex-start;
+        overflow-x: hidden;
+    }
+
+    .container {
+        padding: 10px;
+        border-radius: 12px;
+    }
+
+    header {
+        margin-bottom: 8px;
+    }
+
+    header h1 {
+        font-size: 1.3em;
+        margin-bottom: 6px;
+    }
+
+    .game-info {
+        gap: 10px;
+    }
+
+    .turn-indicator {
+        font-size: 1em;
+        padding: 6px 14px;
+    }
+
+    .status {
+        font-size: 0.95em;
+        min-height: 0;
+    }
+
+    .warning-message {
+        margin-top: 8px;
+        padding: 8px 12px;
+        min-height: 0;
+        font-size: 0.9em;
+    }
+
+    .game-board-container {
+        margin-bottom: 10px;
+    }
+
+    /* Board is as wide as the screen, but never so tall that the buttons drop below it */
+    .board-frame {
+        width: min(100%, calc(100vh - 250px));
+        width: min(100%, calc(100svh - 250px));
+        min-width: 240px;
+        max-width: none;
+        grid-template-columns: 18px 1fr 18px;
+        grid-template-rows: 18px auto 18px;
+        font-size: 0.8em;
+    }
+
+    #chessboard {
+        max-width: none;
+        border-width: 2px;
+        container-type: inline-size;
+    }
+
+    .square {
+        font-size: 7vw;
+        font-size: 10cqw;
+        touch-action: manipulation;
+    }
+
+    .square.possible-move::after {
+        width: 30%;
+        height: 30%;
+    }
+
+    .controls {
+        gap: 6px;
+        margin-bottom: 10px;
+    }
+
+    .castle-controls {
+        margin-top: 0;
+    }
+
+    .controls button {
+        flex: 1 1 22%;
+        padding: 9px 4px;
+        font-size: 0.85em;
+        touch-action: manipulation;
+    }
+
+    .ninja-message {
+        margin: 0 0 10px;
+        padding: 8px 12px;
+        font-size: 0.9em;
+    }
+
+    .promotion-dialog {
+        padding: 16px;
+        margin: 0 10px;
+    }
+
+    .promotion-choices {
+        gap: 6px;
+    }
+
+    .promotion-choice {
+        padding: 8px 10px;
+    }
+
+    .promotion-symbol {
+        font-size: 36px;
+    }
+
+    .move-history {
+        padding: 10px;
+        max-height: 140px;
+    }
+
+    .move-history h3 {
+        margin-bottom: 8px;
+        font-size: 1em;
+    }
+
+    .contact-info {
+        margin-top: 10px;
+        padding-top: 8px;
+    }
+}
+
