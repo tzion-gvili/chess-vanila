@@ -100,6 +100,8 @@ class ChessGame {
     constructor() {
         this.board = this.initializeBoard();
         this.castlingRights = this.initialCastlingRights();
+        // Square a pawn just skipped with a two-square move; capturable en passant for one turn.
+        this.enPassant = null;
         this.currentPlayer = 'white';
         this.selectedSquare = null;
         this.moveHistory = [];
@@ -399,6 +401,10 @@ class ChessGame {
             return true;
         }
         
+        if (Math.abs(toCol - fromCol) === 1 && toRow === fromRow + direction && this.isEnPassantSquare(toRow, toCol)) {
+            return true;
+        }
+        
         return false;
     }
     
@@ -454,6 +460,10 @@ class ChessGame {
         return piece.type === 'pawn' && (toRow === 0 || toRow === 7);
     }
     
+    isEnPassantSquare(row, col) {
+        return !!this.enPassant && this.enPassant[0] === row && this.enPassant[1] === col;
+    }
+    
     // ---------- move generation ----------
     
     onBoard(row, col) {
@@ -463,13 +473,16 @@ class ChessGame {
     // `promotion` is the piece type a pawn becomes on the last row (defaults to queen).
     createMove(fromRow, fromCol, toRow, toCol, castle = null, promotion = 'queen') {
         const piece = this.board[fromRow][fromCol];
+        const enPassant = piece.type === 'pawn' && fromCol !== toCol && this.isEnPassantSquare(toRow, toCol);
         return {
             from: [fromRow, fromCol],
             to: [toRow, toCol],
             piece,
-            captured: this.board[toRow][toCol],
+            // En passant captures the pawn beside the mover, not a piece on the target square.
+            captured: enPassant ? this.board[fromRow][toCol] : this.board[toRow][toCol],
             promotion: this.isPromotion(piece, toRow) ? promotion : null,
-            castle
+            castle,
+            enPassant
         };
     }
     
@@ -509,7 +522,7 @@ class ChessGame {
                     const c = col + dc;
                     if (!this.onBoard(one, c)) continue;
                     const target = this.board[one][c];
-                    if (target && target.color !== color) pushPawn(one, c);
+                    if ((target && target.color !== color) || this.isEnPassantSquare(one, c)) pushPawn(one, c);
                 }
                 break;
             }
@@ -671,11 +684,17 @@ class ChessGame {
             rights: {
                 white: { ...this.castlingRights.white },
                 black: { ...this.castlingRights.black }
-            }
+            },
+            enPassant: this.enPassant
         };
         
         this.board[to[0]][to[1]] = move.promotion ? { type: move.promotion, color: piece.color } : piece;
         this.board[from[0]][from[1]] = null;
+        if (move.enPassant) this.board[from[0]][to[1]] = null;
+        
+        this.enPassant = piece.type === 'pawn' && Math.abs(to[0] - from[0]) === 2
+            ? [(from[0] + to[0]) / 2, from[1]]
+            : null;
         
         if (move.castle) {
             const row = from[0];
@@ -691,9 +710,14 @@ class ChessGame {
     }
     
     undoMove(undo) {
-        const { from, to, piece, castle } = undo.move;
+        const { from, to, piece, castle, enPassant } = undo.move;
         this.board[from[0]][from[1]] = piece;
-        this.board[to[0]][to[1]] = undo.captured;
+        if (enPassant) {
+            this.board[to[0]][to[1]] = null;
+            this.board[from[0]][to[1]] = undo.captured;
+        } else {
+            this.board[to[0]][to[1]] = undo.captured;
+        }
         
         if (castle) {
             const row = from[0];
@@ -703,6 +727,7 @@ class ChessGame {
         }
         
         this.castlingRights = undo.rights;
+        this.enPassant = undo.enPassant;
     }
     
     makeMove(move) {
@@ -722,7 +747,7 @@ class ChessGame {
     }
     
     getMoveNotation(move) {
-        const { piece, from, to, captured, promotion, castle } = move;
+        const { piece, from, to, captured, promotion, castle, enPassant } = move;
         const number = this.moveHistory.length + 1;
         const player = piece.color === 'white' ? 'White' : 'Black';
         
@@ -734,7 +759,8 @@ class ChessGame {
         const toSquare = FILES[to[1]] + (8 - to[0]);
         const capture = captured ? 'x' : '';
         const promo = promotion ? `=${PROMOTION_LETTERS[promotion]}` : '';
-        return `${number}. ${player} ${piece.type} ${fromSquare}${capture}${toSquare}${promo}`;
+        const ep = enPassant ? ' e.p.' : '';
+        return `${number}. ${player} ${piece.type} ${fromSquare}${capture}${toSquare}${promo}${ep}`;
     }
     
     updateMoveHistory() {
@@ -894,6 +920,7 @@ class ChessGame {
         clearTimeout(this.aiTimer);
         this.board = this.initializeBoard();
         this.castlingRights = this.initialCastlingRights();
+        this.enPassant = null;
         this.currentPlayer = 'white';
         this.selectedSquare = null;
         this.moveHistory = [];
@@ -1184,6 +1211,7 @@ class ChessGame {
         
         this.board[row][col] = null;
         this.updateCastlingRights(row, col);
+        this.enPassant = null;
         const player = this.currentPlayer === 'white' ? 'White' : 'Black';
         this.moveHistory.push(`${this.moveHistory.length + 1}. ${player} 🥷 ninja ate ${piece.color} ${piece.type} on ${FILES[col]}${8 - row}`);
         this.updateMoveHistory();
