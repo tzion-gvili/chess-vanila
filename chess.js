@@ -95,6 +95,115 @@ const SEARCH_TIMEOUT = 'search-timeout';
 const BLUNDER_MARGIN = 250;
 const BLUNDER_CHECK_MS = 300;
 const BLUNDER_MESSAGE = "Ilay, pay attention, this isn't the smartest move :) Tap again to play it anyway.";
+const MOVE_ANIMATION_MS = 280;
+
+// Small sounds made with Web Audio, so no sound files are needed.
+class SoundFx {
+    constructor() {
+        this.ctx = null;
+        this.enabled = localStorage.getItem('chess-sound') !== 'off';
+    }
+    
+    // Browsers only allow audio after a user gesture, so this runs on every click/tap.
+    unlock() {
+        if (!this.ctx) {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return;
+            this.ctx = new AudioCtx();
+        }
+        if (this.ctx.state === 'suspended') this.ctx.resume();
+    }
+    
+    toggle() {
+        this.enabled = !this.enabled;
+        localStorage.setItem('chess-sound', this.enabled ? 'on' : 'off');
+        if (this.enabled) this.unlock();
+        return this.enabled;
+    }
+    
+    // One soft note: quick attack, smooth fade. `slideTo` bends the pitch down for a wooden "tock".
+    note(freq, delay, duration, { type = 'sine', volume = 0.2, slideTo = null } = {}) {
+        const t = this.ctx.currentTime + delay;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, t);
+        if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, t + duration);
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(volume, t + 0.008);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+        osc.connect(gain).connect(this.ctx.destination);
+        osc.start(t);
+        osc.stop(t + duration + 0.02);
+    }
+    
+    whoosh(delay) {
+        const t = this.ctx.currentTime + delay;
+        const length = 0.35;
+        const buffer = this.ctx.createBuffer(1, Math.floor(this.ctx.sampleRate * length), this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+        const source = this.ctx.createBufferSource();
+        source.buffer = buffer;
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.Q.value = 1.5;
+        filter.frequency.setValueAtTime(300, t);
+        filter.frequency.exponentialRampToValueAtTime(2500, t + length);
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.25, t + 0.1);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + length);
+        source.connect(filter).connect(gain).connect(this.ctx.destination);
+        source.start(t);
+    }
+    
+    arpeggio(freqs, delay, step, duration, options) {
+        freqs.forEach((f, i) => this.note(f, delay + i * step, duration, options));
+    }
+    
+    play(name, delay = 0) {
+        if (!this.enabled || !this.ctx) return;
+        const wood = { type: 'triangle', volume: 0.28 };
+        switch (name) {
+            case 'move':
+                this.note(520, delay, 0.12, { ...wood, slideTo: 340 });
+                break;
+            case 'capture':
+                this.note(600, delay, 0.12, { ...wood, slideTo: 380 });
+                this.note(990, delay + 0.07, 0.3, { volume: 0.14 });
+                break;
+            case 'castle':
+                this.note(520, delay, 0.1, { ...wood, slideTo: 360 });
+                this.note(440, delay + 0.13, 0.12, { ...wood, slideTo: 300 });
+                break;
+            case 'check':
+                this.note(880, delay, 0.45, { volume: 0.13 });
+                this.note(1320, delay, 0.35, { volume: 0.05 });
+                break;
+            case 'promote':
+                this.arpeggio([523, 659, 784, 1047], delay, 0.08, 0.3, { volume: 0.15 });
+                break;
+            case 'win':
+                this.arpeggio([523, 659, 784, 1047], delay, 0.12, 0.35, { volume: 0.15 });
+                this.note(1319, delay + 0.5, 0.8, { volume: 0.12 });
+                break;
+            case 'lose':
+                this.arpeggio([523, 440, 349, 262], delay, 0.2, 0.4, { type: 'triangle', volume: 0.15 });
+                break;
+            case 'draw':
+                this.arpeggio([523, 523], delay, 0.22, 0.3, { volume: 0.14 });
+                break;
+            case 'ninja':
+                this.whoosh(delay);
+                this.note(1200, delay + 0.25, 0.25, { volume: 0.12, slideTo: 1800 });
+                break;
+            case 'warning':
+                this.note(220, delay, 0.18, { volume: 0.16, slideTo: 170 });
+                break;
+        }
+    }
+}
 
 class ChessGame {
     constructor() {
@@ -113,6 +222,9 @@ class ChessGame {
         this.ninjaReady = false;
         this.pendingPromotion = null;
         this.blunderWarned = null;
+        this.sound = new SoundFx();
+        // The last move, animated the next time the board is drawn.
+        this.animatingMove = null;
         
         this.createBoard();
         this.updateDisplay();
@@ -173,6 +285,52 @@ class ChessGame {
             }
         }
         this.renderCoordinates();
+        
+        if (this.animatingMove) {
+            this.animateMove(this.animatingMove);
+            this.animatingMove = null;
+        }
+    }
+    
+    // The board is already drawn in its new state: slide the piece in from its old square.
+    animateMove(move) {
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        
+        if (move.captured) {
+            const square = this.getSquareElement(move.enPassant ? move.from[0] : move.to[0], move.to[1]);
+            const ghost = document.createElement('div');
+            ghost.className = 'piece captured-ghost';
+            ghost.textContent = this.getPieceSymbol(move.captured);
+            square.appendChild(ghost);
+            ghost.animate([
+                { opacity: 1, transform: 'scale(1)' },
+                { opacity: 0, transform: 'scale(0.3) rotate(25deg)' }
+            ], { duration: MOVE_ANIMATION_MS, easing: 'ease-in' }).onfinish = () => ghost.remove();
+        }
+        
+        this.slidePiece(move.from, move.to);
+        if (move.castle) {
+            const row = move.from[0];
+            const [rookFrom, rookTo] = move.castle === 'king' ? [7, 5] : [0, 3];
+            this.slidePiece([row, rookFrom], [row, rookTo]);
+        }
+    }
+    
+    slidePiece(from, to) {
+        const fromSquare = this.getSquareElement(from[0], from[1]);
+        const toSquare = this.getSquareElement(to[0], to[1]);
+        const piece = toSquare && toSquare.querySelector('.piece:not(.captured-ghost)');
+        if (!fromSquare || !piece) return;
+        
+        const a = fromSquare.getBoundingClientRect();
+        const b = toSquare.getBoundingClientRect();
+        const offset = `translate(${a.left - b.left}px, ${a.top - b.top}px)`;
+        piece.classList.add('moving');
+        piece.animate([
+            { transform: `${offset} scale(1.15)` },
+            { transform: 'translate(0, 0) scale(1.15)', offset: 0.8 },
+            { transform: 'translate(0, 0) scale(1)' }
+        ], { duration: MOVE_ANIMATION_MS, easing: 'ease-in-out' }).onfinish = () => piece.classList.remove('moving');
     }
     
     renderCoordinates() {
@@ -732,8 +890,16 @@ class ChessGame {
     
     makeMove(move) {
         this.applyMove(move);
+        this.animatingMove = move;
+        this.playMoveSound(move);
         this.moveHistory.push(this.getMoveNotation(move));
         this.updateMoveHistory();
+    }
+    
+    playMoveSound(move) {
+        const name = move.promotion ? 'promote' : move.castle ? 'castle' : move.captured ? 'capture' : 'move';
+        this.sound.play(name);
+        if (this.isInCheck(this.opponentOf(move.piece.color))) this.sound.play('check', 0.12);
     }
     
     // Plays a move on the board, runs fn, then puts everything back.
@@ -847,12 +1013,16 @@ class ChessGame {
         }
         
         if (!this.hasAnyLegalMove(this.currentPlayer)) {
+            const justEnded = !this.gameOver;
             this.gameOver = true;
             if (inCheck) {
                 const winner = this.currentPlayer === 'white' ? 'Black' : 'White';
                 status.textContent = `Checkmate! ${winner} wins!`;
+                const humanLost = this.aiEnabled && this.currentPlayer === this.humanColor();
+                if (justEnded) this.sound.play(humanLost ? 'lose' : 'win', 0.5);
             } else {
                 status.textContent = "Stalemate! It's a draw.";
+                if (justEnded) this.sound.play('draw', 0.3);
             }
         } else {
             status.textContent = inCheck ? 'Check!' : '';
@@ -877,6 +1047,7 @@ class ChessGame {
         const finalMessage = message.replace("my friend", greeting);
         warningElement.textContent = finalMessage;
         warningElement.classList.add('show');
+        this.sound.play('warning');
         
         // Auto-hide after 4 seconds
         clearTimeout(this.warningTimer);
@@ -1219,6 +1390,7 @@ class ChessGame {
         this.cancelNinja();
         this.finishTurn();
         this.showNinjaStrike(row, col);
+        this.sound.play('ninja');
     }
     
     showNinjaStrike(row, col) {
@@ -1239,6 +1411,11 @@ class ChessGame {
         document.getElementById('ninja-btn').addEventListener('click', () => this.toggleNinja());
         document.getElementById('castle-left').addEventListener('click', () => this.castle('left'));
         document.getElementById('castle-right').addEventListener('click', () => this.castle('right'));
+        document.getElementById('sound-btn').addEventListener('click', () => this.toggleSound());
+        this.updateSoundButton();
+        for (const type of ['pointerdown', 'keydown']) {
+            document.addEventListener(type, () => this.sound.unlock());
+        }
         document.getElementById('promotion-overlay').addEventListener('click', (e) => {
             if (e.target.id === 'promotion-overlay') this.cancelPromotion();
         });
@@ -1247,6 +1424,18 @@ class ChessGame {
             if (this.pendingPromotion) this.cancelPromotion();
             else if (this.ninjaReady) this.cancelNinja();
         });
+    }
+    
+    toggleSound() {
+        this.sound.toggle();
+        this.updateSoundButton();
+        this.sound.play('move');
+    }
+    
+    updateSoundButton() {
+        const button = document.getElementById('sound-btn');
+        button.textContent = this.sound.enabled ? '🔊 Sound: ON' : '🔇 Sound: OFF';
+        button.classList.toggle('muted', !this.sound.enabled);
     }
     
     // ---------- promotion: the pawn reached the last row, the player picks his new piece ----------
